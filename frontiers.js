@@ -1,0 +1,25 @@
+/* Space Huggers: Frontiers expansion layer. Keeps the original tiny game intact while adding a UI meta-loop. */
+'use strict';
+const frontierUI=document.getElementById('frontier-ui'), shopUI=document.getElementById('shop'), cutsceneUI=document.getElementById('cutscene');
+const startButton=document.getElementById('start-btn'), shopButton=document.getElementById('shop-btn'), backButton=document.getElementById('shop-back');
+const creditsNode=document.getElementById('credits'), itemsNode=document.getElementById('shop-items');
+const frontierData=JSON.parse(localStorage.getItem('spaceHuggersFrontiers')||'{"credits":0,"skin":"aurora","gun":"pulse"}');
+const skins=[['aurora','Aurora Suit',0,'#55eaff'],['ember','Ember Suit',35,'#ff684d'],['void','Void Suit',60,'#b66dff'],['gold','Gold Suit',100,'#ffd45b']];
+const guns=[['pulse','Pulse Rifle',0,'rapid reliable'],['scatter','Scatter Blaster',45,'wide spread'],['rail','Rail Lance',80,'slow piercing']];
+let frontierStarted=false, frontierSpawnTimer=0;
+function saveFrontiers(){localStorage.setItem('spaceHuggersFrontiers',JSON.stringify(frontierData));}
+function refreshShop(){creditsNode.textContent=frontierData.credits;itemsNode.innerHTML='';[...skins,...guns].forEach(item=>{const isGun=guns.includes(item), owned=frontierData[isGun?'gun':'skin']==item[0];const card=document.createElement('div');card.className='card';card.innerHTML=`<b style="color:${item[3]||'#fff'}">${item[1]}</b><span>${isGun?item[3]:item[2]?'Cost '+item[2]+'c':'Unlocked'}</span><br><button class="ui-btn">${owned?'Equipped':item[2]?'Buy':'Equip'}</button>`;card.querySelector('button').onclick=()=>{const key=isGun?'gun':'skin';if(frontierData[key]==item[0])return;if(!item[2]||frontierData.credits>=item[2]){if(item[2])frontierData.credits-=item[2];frontierData[key]=item[0];saveFrontiers();refreshShop()}};itemsNode.appendChild(card)});}
+function showShop(){frontierUI.classList.add('hidden');shopUI.classList.remove('hidden');refreshShop();paused=true}
+function startFrontier(){shopUI.classList.add('hidden');frontierUI.classList.add('hidden');cutsceneUI.classList.remove('hidden');setTimeout(()=>{cutsceneUI.classList.add('hidden');frontierStarted=true;paused=false;resetGame()},2600)}
+startButton.onclick=startFrontier;shopButton.onclick=showShop;backButton.onclick=()=>{shopUI.classList.add('hidden');frontierUI.classList.remove('hidden')};
+// The original engine has already initialized its first level; hold it under the menu.
+paused=true;
+// Add three visually distinct specialist classes that share the proven base AI and physics.
+class FrontierEnemy extends Enemy{constructor(pos,kind){super(pos);this.frontierKind=kind;this.weaponType=kind==='sniper'?'rail':'pulse';if(kind==='drone'){this.color=new Color(.1,.9,1);this.eyeColor=new Color(1,1,1);this.health=this.healthMax=3;this.gravityScale=.15}else if(kind==='brute'){this.color=new Color(.9,.15,.05);this.eyeColor=new Color(1,.8,0);this.health=this.healthMax=8;this.size=this.size.scale(1.35);this.weaponType='scatter'}else{this.color=new Color(.7,.25,1);this.eyeColor=new Color(1,1,1);this.health=this.healthMax=2;this.maxVisionRange=22}this.color=this.color.mutate();}}
+const originalWeaponUpdate=Weapon.prototype.update;
+Weapon.prototype.update=function(){const type=this.parent&&this.parent.weaponType;if(!type)return originalWeaponUpdate.call(this);this.mirror=this.parent.mirror;this.fireTimeBuffer+=timeDelta;const stats={pulse:[9,.52,.1,1,'#ffe66d'],scatter:[2,.42,.32,1.8,'#ff9a4d'],rail:[.65,1.05,.015,3,'#72eaff']}[type]||[9,.52,.1,1,'#ffe66d'];if(this.recoilTimer.active())this.localAngle=lerp(this.recoilTimer.getPercent(),0,this.localAngle);if(this.triggerIsDown)for(;this.fireTimeBuffer>0;this.fireTimeBuffer-=1/stats[0]){this.localAngle=-rand(.2,.15);this.recoilTimer.set(.2);for(let n=type==='scatter'?5:1;n--;){const b=new Bullet(this.pos,this.parent);b.damage=stats[3];b.range=type==='rail'?15:stats[1]*12;b.color=Color.fromHex?Color.fromHex(stats[4]):new Color(1,1,0);b.velocity=vec2(this.getMirrorSign(.5),0).rotate(rand(stats[2],-stats[2]));}playSound(sound_shoot,this.pos);this.parent.isPlayer&&alertEnemies(this.pos,this.pos)}else this.fireTimeBuffer=min(this.fireTimeBuffer,0)};
+// Equip the selected skin and gun whenever a player is created or respawns.
+function applyLoadout(){for(const p of players){if(!p)continue;const s=skins.find(x=>x[0]===frontierData.skin);if(s){p.color=new Color(s[3]==='#55eaff'?0:.9,s[3]==='#55eaff'?1:.25,s[3]==='#ffd45b'?0:.9)}p.weaponType=frontierData.gun}}
+const oldNextLevel=nextLevel;nextLevel=function(){oldNextLevel();applyLoadout();frontierSpawnTimer=0};
+// Periodic reinforcements keep the later missions fresh without changing the original generator.
+const frontierTick=setInterval(()=>{if(!frontierStarted||paused||!players[0]||!level)return;if(++frontierSpawnTimer%900===0){const p=players[0];const kinds=['drone','brute','sniper'];new FrontierEnemy(p.pos.add(vec2(rand(14,8),rand(5,2))),kinds[level%3]);applyLoadout()}if(frame%60===0)frontierData.credits+=1;},1000);
